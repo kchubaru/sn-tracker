@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SN 結構型票券追蹤器</title>
+<!--
+  ╔══════════════════════════════════════════════════════════════╗
+  ║  SN Worst-of Autocall 結構型票券追蹤器  v2.0                 ║
+  ║  產品結構：                                                   ║
+  ║    · 多標的物 (2-3個)，各有期初價 & KI                       ║
+  ║    · 保護期內 KI 不觀察                                       ║
+  ║    · 保護期後每日觀察：任一標的跌破 KI 即敲入                 ║
+  ║    · 觀察日：全部標的 >= Autocall 觸發價則提前贖回            ║
+  ║  Autocall 儀表板新功能：                                      ║
+  ║    · 每個標的距觸發價的距離%                                  ║
+  ║    · 未來所有觀察日時間軸（含現價預測）                       ║
+  ║    · 歷史觀察日結果紀錄（Y/N）                               ║
+  ║    · 整體通過率（X/N 個達標）                                 ║
+  ╚══════════════════════════════════════════════════════════════╝
+-->
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:       #0d0f14;
+  --bg2:      #151820;
+  --bg3:      #1c1f2b;
+  --bg4:      #222636;
+  --border:   rgba(255,255,255,0.12);
+  --border2:  rgba(255,255,255,0.22);
+  --text:     #e8eaf0;
+  --text2:    #a0a7c1;
+  --text3:    #717796;
+  --accent:   #4f7cff;
+  --safe:     #22c55e;
+  --safe-bg:  rgba(34,197,94,0.12);
+  --warn:     #f59e0b;
+  --warn-bg:  rgba(245,158,11,0.12);
+  --danger:   #ef4444;
+  --danger-bg:rgba(239,68,68,0.12);
+  --ki-hit:   #ff2d55;
+  --ki-bg:    rgba(255,45,85,0.15);
+  --gold:     #fbbf24;
+  --gold-bg:  rgba(251,191,36,0.12);
+  --green:    #34d399;
+  --green-bg: rgba(52,211,153,0.12);
+  --mono:     'Courier New', Courier, monospace;
+  --sans:     'Segoe UI', system-ui, -apple-system, sans-serif;
+  --r:        10px;
+  --rl:       16px;
+}
+body { background:var(--bg); color:var(--text); font-family:var(--sans); font-size:14px; line-height:1.6; min-height:100vh; }
+.page { max-width:980px; margin:0 auto; padding:24px 16px 80px; }
+
+/* 標題 */
+.header { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; padding-bottom:20px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:12px; }
+.header h1 { font-size:22px; font-weight:600; letter-spacing:-0.3px; }
+.header p  { font-size:12px; color:var(--text2); margin-top:2px; }
+.date-badge { font-family:var(--mono); font-size:11px; color:var(--text2); background:var(--bg3); border:1px solid var(--border); padding:4px 10px; border-radius:6px; }
+
+/* 摘要 */
+.sum-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:28px; }
+.metric { background:var(--bg2); border:1px solid var(--border); border-radius:var(--r); padding:14px 16px; }
+.m-lbl { font-size:11px; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+.m-val { font-size:26px; font-weight:600; font-family:var(--mono); color:var(--text); }
+.m-val.d { color:var(--danger); } .m-val.w { color:var(--warn); } .m-val.s { color:var(--safe); } .m-val.g { color:var(--gold); }
+.m-sub { font-size:11px; color:var(--text3); margin-top:2px; }
+
+/* toolbar */
+.toolbar { display:flex; align-items:center; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+.sec-title { font-size:13px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:0.8px; flex:1; }
+
+/* 按鈕 */
+.btn { font-size:12px; padding:7px 14px; border-radius:8px; border:1px solid var(--border2); background:var(--bg3); color:var(--text); cursor:pointer; transition:background 0.15s; white-space:nowrap; }
+.btn:hover { background:var(--bg4); border-color:var(--accent); }
+.btn-p { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+.btn-p:hover { background:#3d6ef0; }
+.btn-s { font-size:11px; padding:4px 10px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--text2); cursor:pointer; }
+.btn-s:hover { background:var(--bg3); color:var(--text); }
+.btn-d { font-size:11px; padding:4px 10px; border-radius:6px; border:1px solid rgba(239,68,68,0.3); background:transparent; color:var(--danger); cursor:pointer; }
+.btn-d:hover { background:var(--danger-bg); }
+
+/* 卡片 */
+.card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--rl); margin-bottom:14px; overflow:hidden; transition:border-color 0.2s; }
+.card:hover { border-color:var(--border2); }
+.card.s-ki  { border-left:3px solid var(--ki-hit); }
+.card.s-d   { border-left:3px solid var(--danger); }
+.card.s-w   { border-left:3px solid var(--warn); }
+.card.s-ok  { border-left:3px solid var(--safe); }
+.card.s-exp { border-left:3px solid var(--text3); }
+.card.s-rdm { border-left:3px solid var(--text3); opacity: 0.8; }
+
+.ctop { display:flex; align-items:center; justify-content:space-between; padding:14px 18px 12px; flex-wrap:wrap; gap:8px; cursor:pointer; user-select:none; }
+.ctop:hover .cname { color:var(--accent); }
+.cleft { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.cname { font-size:16px; font-weight:600; transition:color 0.15s; }
+.cnote { font-size:11px; color:var(--text3); }
+.cright { display:flex; align-items:center; gap:8px; }
+.chevron { color:var(--text3); font-size:18px; transition:transform 0.2s; }
+.card.open .chevron { transform:rotate(180deg); }
+.cbody { display:none; padding:0 18px 18px; }
+.card.open .cbody { display:block; }
+
+/* badge */
+.badge { font-size:11px; font-weight:600; padding:3px 10px; border-radius:99px; letter-spacing:0.3px; }
+.b-ok  { background:var(--safe-bg);  color:var(--safe);   border:1px solid rgba(34,197,94,0.3); }
+.b-w   { background:var(--warn-bg);  color:var(--warn);   border:1px solid rgba(245,158,11,0.3); }
+.b-d   { background:var(--danger-bg);color:var(--danger); border:1px solid rgba(239,68,68,0.3); }
+.b-ki  { background:var(--ki-bg);    color:var(--ki-hit); border:1px solid rgba(255,45,85,0.3); }
+.b-exp { background:var(--bg3);      color:var(--text3);  border:1px solid var(--border); }
+.b-pro { background:rgba(79,124,255,0.1); color:var(--accent); border:1px solid rgba(79,124,255,0.3); }
+.b-ac  { background:var(--green-bg); color:var(--green);  border:1px solid rgba(52,211,153,0.3); }
+.b-rdm { background:var(--bg4);      color:var(--text2);  border:1px solid var(--border2); }
+
+/* 閃爍動畫：今日可贖回 */
+@keyframes ac-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); transform: scale(1); }
+  70% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); transform: scale(1.02); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); transform: scale(1); }
+}
+.b-ac-flash { background:var(--green); color:#fff; border:none; animation: ac-pulse 2s infinite; }
+
+/* 區塊標題 */
+.blk-hdr { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--border); }
+
+/* KI 區塊 */
+.ki-blk { background:var(--bg3); border-radius:8px; padding:12px 14px; margin-bottom:16px; border:1px solid var(--border); }
+.wof-row { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.wof-row:last-child { margin-bottom:0; }
+.wof-tk { font-family:var(--mono); font-size:12px; font-weight:600; min-width:80px; }
+.met-badge { color:var(--gold); font-size:10px; margin-left:5px; font-weight:bold; vertical-align:middle; }
+.wof-tk.worst { color:var(--danger); }
+.wof-tk.worst::after { content:' \25BC'; font-size:10px; margin-left:2px; }
+.prog-bg { flex:1; height:5px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden; }
+.prog-fill { height:100%; border-radius:3px; }
+.wof-pct { font-family:var(--mono); font-size:12px; font-weight:600; min-width:52px; text-align:right; }
+.wof-info { font-size:11px; color:var(--text2); min-width:130px; text-align:right; }
+
+/* ===================== Autocall 儀表板 ===================== */
+.ac-dash { background:var(--bg3); border:1px solid rgba(251,191,36,0.18); border-radius:var(--r); padding:14px 16px; margin-bottom:16px; }
+
+/* 距觸發價距離 */
+.ac-dist-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:12px; }
+.ac-dist-item { background:var(--bg4); border-radius:8px; padding:10px 12px; border:1px solid var(--border); }
+.ac-dt { font-family:var(--mono); font-size:11px; color:var(--text2); margin-bottom:4px; }
+.ac-dv { font-family:var(--mono); font-size:20px; font-weight:600; }
+.ac-dv.ab { color:var(--green); }
+.ac-dv.bl { color:var(--warn); }
+.ac-dp { font-size:10px; color:var(--text3); margin-top:3px; }
+
+/* 通過率 */
+.ac-rate { display:flex; align-items:center; gap:12px; padding:10px 12px; background:var(--bg4); border-radius:8px; border:1px solid var(--border); margin-bottom:12px; }
+.ac-rate-lbl { font-size:11px; color:var(--text2); min-width:72px; }
+.ac-bar-wrap { flex:1; }
+.ac-bar-bg { height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden; }
+.ac-bar-fill { height:100%; border-radius:3px; background:var(--gold); }
+.ac-rate-num { font-family:var(--mono); font-size:13px; font-weight:600; color:var(--gold); min-width:44px; text-align:right; }
+
+/* 觀察日時間軸 */
+.ac-tl-lbl { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px; }
+.ac-rows { display:flex; flex-direction:column; gap:6px; }
+
+.ac-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--bg4); flex-wrap:wrap; }
+.ac-row.r-next   { border-color:rgba(79,124,255,0.4); background:rgba(79,124,255,0.05); }
+.ac-row.r-passed { border-color:rgba(52,211,153,0.25); background:rgba(52,211,153,0.04); }
+.ac-row.r-missed { opacity:0.4; }
+
+/* 觀察日期 */
+.ac-date { font-family:var(--mono); font-size:12px; font-weight:600; min-width:96px; color:var(--text); }
+.ac-row.r-next   .ac-date { color:var(--accent); }
+.ac-row.r-passed .ac-date { color:var(--green); }
+.ac-daily-tag { font-size:9px; color:var(--gold); margin-left:4px; vertical-align: middle; border:1px solid rgba(251,191,36,0.3); padding:0 3px; border-radius:3px; }
+
+/* 倒數 */
+.ac-cd { font-size:11px; color:var(--text3); min-width:68px; }
+.ac-row.r-next .ac-cd { color:var(--accent); font-weight:600; }
+
+/* 標的 pill */
+.ac-pills { display:flex; gap:5px; flex-wrap:wrap; flex:1; }
+.ac-pill { font-size:10px; font-family:var(--mono); padding:2px 7px; border-radius:4px; border:1px solid var(--border); color:var(--text2); white-space:nowrap; }
+.ac-pill.ab { background:var(--green-bg); color:var(--green); border-color:rgba(52,211,153,0.3); }
+.ac-pill.bl { background:var(--warn-bg);  color:var(--warn);  border-color:rgba(245,158,11,0.3); }
+.ac-pill.uk { color:var(--text3); }
+
+/* 結果欄 */
+.ac-res { font-size:11px; font-weight:600; padding:2px 8px; border-radius:4px; white-space:nowrap; min-width:56px; text-align:center; }
+.ac-res.hit  { background:var(--green-bg); color:var(--green); }
+.ac-res.miss { background:var(--warn-bg);  color:var(--warn); }
+.ac-res.ftr  { color:var(--text3); }
+.ac-res.tdy  { background:rgba(79,124,255,0.15); color:var(--accent); }
+
+/* 保護期 */
+.protect-banner { background:rgba(79,124,255,0.08); border:1px solid rgba(79,124,255,0.2); border-radius:8px; padding:8px 12px; font-size:12px; color:var(--accent); margin-bottom:14px; }
+
+/* 欄位 */
+.fields-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:14px; }
+.fl { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; }
+.fv { font-size:14px; font-weight:600; font-family:var(--mono); color:var(--text); }
+.fv.s { color:var(--safe); } .fv.w { color:var(--warn); } .fv.g { color:var(--gold); }
+.fs { font-size:11px; color:var(--text3); margin-top:1px; }
+
+.card-acts { display:flex; gap:6px; flex-wrap:wrap; border-top:1px solid var(--border); padding-top:12px; margin-top:4px; }
+.empty { text-align:center; padding:60px 20px; color:var(--text3); font-size:14px; }
+
+/* Modal */
+.modal-bg { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:1000; padding:16px; }
+.modal { background:var(--bg2); border:1px solid var(--border2); border-radius:var(--rl); width:min(560px,100%); max-height:88vh; overflow-y:auto; padding:24px; }
+.modal h3 { font-size:17px; font-weight:600; margin-bottom:20px; }
+.fst { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.8px; margin:18px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--border); }
+.fr { margin-bottom:12px; }
+.fl2 { display:block; font-size:11px; color:var(--text2); margin-bottom:5px; }
+.fl2 span { color:var(--text3); font-size:10px; }
+input[type=text],input[type=number],input[type=date],select,textarea { width:100%; font-size:13px; padding:8px 11px; border-radius:8px; border:1px solid var(--border2); background:var(--bg3); color:var(--text); outline:none; font-family:var(--sans); transition:border-color 0.15s; }
+input:focus,select:focus { border-color:var(--accent); }
+input::placeholder,textarea::placeholder { color:var(--text3); }
+.fr2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; }
+.fr3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:12px; }
+.ub { background:var(--bg3); border:1px solid var(--border); border-radius:var(--r); padding:12px; margin-bottom:10px; }
+.ub-title { font-size:11px; color:var(--text2); font-weight:600; margin-bottom:10px; }
+.m-acts { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; padding-top:16px; border-top:1px solid var(--border); }
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:var(--bg3); border-radius:3px; }
+input[type=date]::-webkit-calendar-picker-indicator { filter:invert(0.6); }
+
+/* 全域更新動畫遮罩 */
+#loading-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); display:none; flex-direction:column; align-items:center; justify-content:center; z-index:2000; backdrop-filter:blur(4px); }
+.loader { width:48px; height:48px; border:5px solid var(--bg3); border-top:5px solid var(--accent); border-radius:50%; animation:spin 1s linear infinite; margin-bottom:16px; }
+.loading-text { font-size:15px; color:var(--text); font-weight:500; letter-spacing:1px; }
+@keyframes spin { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="header">
+    <div>
+      <h1>SN 票券追蹤</h1>
+      <p>Worst-of Autocall · 任一標的跌破 KI 即敲入 · 手動更新現價</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span class="date-badge" id="today-badge"></span>
+      <button class="btn btn-p" onclick="openModal()">＋ 新增票券</button>
+    </div>
+  </div>
+
+  <div class="sum-grid" id="summary"></div>
+
+  <div class="toolbar">
+    <span class="sec-title">持有票券</span>
+    <button class="btn btn-p" onclick="updateAllPrices()">全部更新現價</button>
+    <button class="btn" onclick="exportData()">匯出備份</button>
+    <button class="btn" onclick="importData()">匯入備份</button>
+    <button class="btn" onclick="expandAll()">全部展開</button>
+    <button class="btn" onclick="collapseAll()">全部收合</button>
+  </div>
+
+  <div id="cards"></div>
+</div>
+
+<!-- Modal -->
+<div id="modal" style="display:none;">
+  <div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <h3 id="m-title">新增票券</h3>
+
+      <div class="fst">基本資訊</div>
+      <div class="fr"><label class="fl2">票券名稱</label><input type="text" id="f-name" placeholder="e.g. 台積+NVDA 2025Q4"></div>
+      <div class="fr3">
+        <div><label class="fl2">起始日</label><input type="date" id="f-start"></div>
+        <div><label class="fl2">到期日</label><input type="date" id="f-end"></div>
+        <div><label class="fl2">每日觀察起始日</label><input type="date" id="f-obs-start"></div>
+      </div>
+      <div class="fr2">
+        <div><label class="fl2">票面利率（年化 %） <span id="f-calc-result" style="color:var(--safe); font-weight:600;"></span></label><input type="number" id="f-rate" step="0.01" placeholder="e.g. 18.5"></div>
+        <div><label class="fl2">配息週期</label><select id="f-cycle"><option>月配</option><option>季配</option><option>半年配</option><option>到期配</option></select></div>
+      </div>
+      <div class="fr3">
+        <div><label class="fl2">自有資金</label><input type="number" id="f-own-cap" placeholder="e.g. 40000"></div>
+        <div><label class="fl2">融資金額</label><input type="number" id="f-margin-cap" placeholder="e.g. 60000"></div>
+        <div><label class="fl2">融資利率 %</label><input type="number" id="f-margin-rate" step="0.01" placeholder="年利率"></div>
+      </div>
+      <div class="fr3">
+        <div><label class="fl2">總投入 (自動)</label><input type="number" id="f-principal" readonly style="background:var(--bg); color:var(--text3);"></div>
+        <div><label class="fl2">預估年息 (自動)</label><input type="number" id="f-est-int" readonly style="background:var(--bg); color:var(--text3);"></div>
+        <div><label class="fl2">實際已領利息</label><input type="number" id="f-act-int" placeholder="累計已領金額"></div>
+      </div>
+      <div class="fr"><label class="fl2">贖回日期 <span>（提前出場時填寫）</span></label><input type="date" id="f-redeemed"></div>
+      <div class="fr"><label class="fl2">備註 <span>（選填）</span></label><input type="text" id="f-note" placeholder="e.g. 銀行A · 第3張"></div>
+
+      <div class="fst">標的物設定</div>
+      <div style="margin-bottom:12px;"><label class="fl2">標的物數量</label><input type="number" id="f-ucount" min="1" max="10" onchange="renderUF()" style="width:80px;"></div>
+      <div id="u-fields"></div>
+
+      <div class="fst">Autocall 觀察日</div>
+      <div class="fr2">
+        <div><label class="fl2">每日觀察起始日 <span>（選填）</span></label><input type="date" id="f-ac-daily-start"></div>
+        <div style="display:flex;align-items:flex-end;font-size:10px;color:var(--text3);padding-bottom:8px;">* 若設定，此日期後每日皆為觀察日</div>
+      </div>
+      <div class="fr"><label class="fl2">特定觀察日列表 <span>（非每日觀察時期，逗號分隔）</span></label><textarea id="f-obs" rows="2" placeholder="e.g. 2025-06-20, 2025-09-20, 2025-12-20"></textarea></div>
+      <div class="fr">
+        <label class="fl2">Autocall 觸發條件 <span>（全部標的 ≥ 此比例 × 期初價）</span></label>
+        <div style="display:flex;align-items:center;gap:8px;"><input type="number" id="f-acpct" value="100" min="50" max="130" step="1" style="width:90px;"><span style="color:var(--text2);font-size:13px;">% × 期初價</span></div>
+      </div>
+      <div class="fr"><label class="fl2">歷史觀察日結果 <span>（選填，格式：YYYY-MM-DD:Y 或 :N，逗號分隔）</span></label><textarea id="f-hist" rows="2" placeholder="e.g. 2025-03-20:N, 2025-06-20:Y"></textarea></div>
+
+      <div class="m-acts">
+        <button class="btn" onclick="closeModal()">取消</button>
+        <button class="btn btn-p" onclick="saveCard()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Loading 動畫層 -->
+<div id="loading-overlay">
+  <div class="loader"></div>
+  <div class="loading-text" id="loading-text">正在更新股價...</div>
+</div>
+
+<script>
+// ── 日期工具 ──
+const today = new Date();
+today.setHours(0,0,0,0);
+const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+function pd(s) { if(!s) return null; const d=new Date(s+'T00:00:00'); return isNaN(d)?null:d; }
+function fd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function diff(d1,d2) { return Math.round((d2-d1)/86400000); }
+function fmt(n,dec=2) { if(n==null||isNaN(n)) return '—'; return Number(n).toLocaleString('zh-TW', {minimumFractionDigits:dec, maximumFractionDigits:dec}); }
+
+// ── 資料 ──
+const KEY='sn_data';
+function load() { 
+  try { 
+    const stored = localStorage.getItem(KEY);
+    // 這裡判斷更嚴謹，確保讀到的是有效的陣列
+    const parsed = stored ? JSON.parse(stored) : null;
+    return (Array.isArray(parsed) && parsed.length > 0) ? parsed : null;
+  } catch(e){ return null; } 
+}
+function save(d) { 
+  try { 
+    localStorage.setItem(KEY,JSON.stringify(d)); 
+    console.log('資料已存入 LocalStorage:', d);
+  } catch(e){ alert('儲存失敗'); } 
+}
+
+// 預設先給空陣列，等最後初始化
+let data = [];
+let editIdx = -1;
+const expanded=new Set();
+
+/** 匯出資料為 JSON 檔案 */
+function exportData() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `sn_tracker_backup_${todayStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** 匯入 JSON 備份檔案並恢復資料 */
+function importData() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = event => {
+      try {
+        const imported = JSON.parse(event.target.result);
+        if (Array.isArray(imported)) {
+          if (confirm('匯入將覆蓋目前瀏覽器中的所有資料，確定要繼續嗎？')) {
+            data = imported;
+            save(data);
+            render();
+            alert('資料已成功恢復！');
+          }
+        } else {
+          alert('錯誤：無效的備份檔案格式。');
+        }
+      } catch (err) {
+        alert('解析備份檔案失敗：' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+// ── 狀態 ──
+
+/** 取 Worst-of 緩衝距離（現價距 KI 的空間，以期初價為分母）*/
+function worstBuf(us) {
+  if(!us||!us.length) return Infinity;
+  return Math.min(...us.map(u=>{
+    const p=parseFloat(u.price),ki=parseFloat(u.ki),ip=parseFloat(u.initPrice)||p;
+    return (isNaN(p)||isNaN(ki))?Infinity:((p-ki)/ip)*100;
+  }));
+}
+
+/** 找最差標的的 index */
+function worstIdx(us) {
+  let mb=Infinity,mi=0;
+  (us||[]).forEach((u,i)=>{
+    const p=parseFloat(u.price),ki=parseFloat(u.ki),ip=parseFloat(u.initPrice)||p;
+    if(!isNaN(p)&&!isNaN(ki)){const b=((p-ki)/ip)*100;if(b<mb){mb=b;mi=i;}}
+  });
+  return mi;
+}
+
+/** 票券整體狀態 */
+function getStatus(sn) {
+  if(sn.redeemedDate) return {cls:'rdm', lbl:'已贖回', bc:'b-rdm'};
+  const end=pd(sn.end),st=pd(sn.start);
+  if(!end||!st) return {cls:'ok',lbl:'資料不足',bc:'b-exp'};
+  if(today>end) return {cls:'exp',lbl:'已到期',bc:'b-exp'};
+  const obsStart = pd(sn.obsStart);
+  const inPro = obsStart ? today < obsStart : false;
+  const wb=worstBuf(sn.underlyings);
+  if(!inPro){
+    if(wb<=0)  return {cls:'ki', lbl:'已敲入',bc:'b-ki'};
+    if(wb<=10) return {cls:'d',  lbl:'危險',  bc:'b-d'};
+    if(wb<=20) return {cls:'w',  lbl:'警戒',  bc:'b-w'};
+  }
+  if(inPro) return {cls:'ok',lbl:'保護期',bc:'b-pro'};
+  return {cls:'ok',lbl:'安全',bc:'b-ok'};
+}
+
+// ── Autocall 分析 ──
+
+/**
+ * 分析 Autocall 儀表板所需資料
+ * 距觸發價距離 = (現價 - 觸發價) / 觸發價 * 100
+ * 正數 = 已超過（好），負數 = 還差多少
+ */
+function analyzeAC(sn) {
+  const acPct = parseFloat(sn.autocallPct)||100;
+  const us    = sn.underlyings||[];
+  const hist  = sn.obsHistory||{};
+  const acDailyStart = sn.acDailyStart || null;
+  // 如果票券已贖回，則今日不再判定為觀察日
+  const isObsToday = !sn.redeemedDate && ((sn.obs || []).includes(todayStr) || (acDailyStart && todayStr >= acDailyStart));
+
+  // 每個標的的距離%
+  const distItems = us.map(u=>{
+    const p=parseFloat(u.price), ip=parseFloat(u.initPrice);
+    const trig=ip*acPct/100;
+    const distPct=(!isNaN(p)&&!isNaN(ip))?(( p-trig)/trig)*100:null;
+    
+    // 計算還差多少錢與還需上漲幾 %
+    const gapAmt = trig > p ? (trig - p) : 0;
+    const neededPct = (trig > p && p > 0) ? ((trig / p) - 1) * 100 : 0;
+
+    return {ticker:u.ticker,price:p,initPrice:ip,trig,distPct,gapAmt,neededPct};
+  });
+
+  // 今日能否觸發（所有標的 >= 觸發價）
+  const canToday = distItems.every(d=>d.distPct!==null&&d.distPct>=0);
+
+  // 距離全數達標還差多少 % (取標的中最差的那個距離)
+  const worstDistToTrig = Math.min(...distItems.map(d => d.distPct || -Infinity));
+  const distRemaining = worstDistToTrig < 0 ? Math.abs(worstDistToTrig) : 0;
+
+  // 整理觀察日
+  const allObs=(sn.obs||[]).slice().sort();
+  let passCount=0, histTotal=0;
+
+  const obsRows = allObs.map(ds=>{
+    const isPast=ds<todayStr, isToday=ds===todayStr;
+    let result='ftr', histR=null;
+
+    if(isPast){
+      histR=hist[ds]||null; histTotal++;
+      if(histR==='Y') passCount++;
+      result=histR==='Y'?'passed':'missed';
+    } else if(isToday){
+      result='today';
+    }
+
+    const daysTo=diff(today,pd(ds));
+
+    // 每個標的在該日的判斷（過去僅有整體 Y/N，個別標的以整體結果推算顯示）
+    const uStatus=us.map(u=>{
+      const trig=parseFloat(u.initPrice)*acPct/100;
+      const p=parseFloat(u.price);
+      if(isPast){
+        // 過去：個別標的無資料，以整體結果顯示
+        return {ticker:u.ticker,st:histR==='Y'?'ab':histR==='N'?'bl':'uk'};
+      }
+      return {ticker:u.ticker,st:(!isNaN(p)&&!isNaN(trig))?(p>=trig?'ab':'bl'):'uk'};
+    });
+
+    const allAbove=uStatus.every(u=>u.st==='ab');
+    const isDaily = acDailyStart && ds >= acDailyStart;
+    return {ds,isPast,isToday,result,histR,daysTo,uStatus,allAbove,isDaily};
+  });
+
+  const nextObs=allObs.filter(d=>d>=todayStr).sort()[0]||null;
+  return {distItems,obsRows,passCount,histTotal,totalObs:allObs.length,nextObs,canToday,acPct,isObsToday,acDailyStart,distRemaining};
+}
+
+// ── 渲染 ──
+
+function renderBadge() {
+  document.getElementById('today-badge').textContent='今日 '+todayStr;
+}
+
+function renderSummary() {
+  if(!data.length){document.getElementById('summary').innerHTML='';return;}
+  let ki=0,d=0,w=0,exp=0,acToday=0,totalP=0,totalA=0,totalEstAnn=0,totalTheo=0,redCount=0,redP=0,redI=0,totalOwn=0,totalMargin=0,redOwn=0;
+  data.forEach(sn=>{
+    const st=getStatus(sn);
+    if(st.cls==='ki')ki++;
+    else if(st.cls==='d')d++;
+    else if(st.cls==='w')w++;
+    const end=pd(sn.end);
+    if(end){const dl=diff(today,end);if(dl>=0&&dl<=30)exp++;}
+    const ac=analyzeAC(sn);
+    if(ac.isObsToday && ac.canToday) acToday++;
+    const own = parseFloat(sn.ownCapital || 0);
+    const margin = parseFloat(sn.marginCapital || 0);
+    const p = own + margin;
+    totalOwn += own; totalMargin += margin;
+    const r = parseFloat(sn.rate || 0);
+    totalP += p;
+    totalA += parseFloat(sn.actualInterest || 0);
+    
+    // 僅針對未贖回票券計算預計利息與理論應領
+    if (!sn.redeemedDate) {
+      const ann = p * (r / 100);
+      totalEstAnn += ann;
+      const start = pd(sn.start);
+      if (start) {
+        const days = Math.max(0, diff(start, today));
+        totalTheo += ann * (days / 365);
+      }
+    } else {
+      // 已贖回票券統計
+      redCount++;
+      redP += p;
+      redOwn += own;
+      redI += parseFloat(sn.actualInterest || 0);
+    }
+  });
+  const rates=data.filter(sn=>!isNaN(parseFloat(sn.rate)));
+  const avg=rates.length?(rates.reduce((a,sn)=>a+parseFloat(sn.rate),0)/rates.length).toFixed(2):'—';
+
+  const redROI = redOwn > 0 ? (redI / redOwn * 100).toFixed(2) : '—';
+
+  document.getElementById('summary').innerHTML=`
+    <div class="metric"><div class="m-lbl">持有票數</div><div class="m-val">${data.length}</div><div class="m-sub">目前追蹤中</div></div>
+    <div class="metric"><div class="m-lbl">自有資金總額</div><div class="m-val s">${fmt(totalOwn, 0)}</div><div class="m-sub">融資總額：${fmt(totalMargin, 0)}</div></div>
+    <div class="metric"><div class="m-lbl">預計年利息</div><div class="m-val s">${fmt(totalEstAnn, 0)}</div><div class="m-sub">年化預估收</div></div>
+    <div class="metric"><div class="m-lbl">總平均每日獲利</div><div class="m-val g">${fmt(totalEstAnn / 365, 2)}</div><div class="m-sub">每日利息收入</div></div>
+    <div class="metric"><div class="m-lbl">目前預估利息</div><div class="m-val g">${fmt(totalTheo, 0)}</div><div class="m-sub">理論累積</div></div>
+    <div class="metric"><div class="m-lbl">累計已領利息</div><div class="m-val s">${fmt(totalA, 0)}</div><div class="m-sub">實際已入帳</div></div>
+    <div class="metric"><div class="m-lbl">結案累積獲利</div><div class="m-val g">${fmt(redI, 0)}</div><div class="m-sub">已結案數：${redCount}</div></div>
+    <div class="metric"><div class="m-lbl">結案平均投報</div><div class="m-val g">${redROI}${redOwn > 0 ? '%' : ''}</div><div class="m-sub">ROI (利息/自有資金)</div></div>
+    <div class="metric"><div class="m-lbl">已敲入/警戒</div><div class="m-val ${ki+d>0?'d':''}">${ki+d}</div><div class="m-sub">已穿越或距 KI &le;10%</div></div>
+    <div class="metric"><div class="m-lbl">今日可 Autocall</div><div class="m-val ${acToday>0?'g':''}">${acToday}</div><div class="m-sub">觀察日達標</div></div>
+    <div class="metric"><div class="m-lbl">平均利率</div><div class="m-val s">${avg}${rates.length?'%':''}</div></div>
+  `;
+}
+
+function renderCards() {
+  const c=document.getElementById('cards');
+  if(!data.length){c.innerHTML='<div class="empty"><p>尚無票券。點「＋ 新增票券」開始。</p></div>';return;}
+  const order={ki:0,d:1,w:2,ok:3,exp:4};
+  const sorted=data.map((sn,i)=>({sn,i})).sort((a,b)=>(order[getStatus(a.sn).cls]??5)-(order[getStatus(b.sn).cls]??5));
+  c.innerHTML=sorted.map(({sn,i})=>buildCard(sn,i)).join('');
+}
+
+function buildCard(sn,idx) {
+  const st=getStatus(sn);
+  const end=pd(sn.end),start=pd(sn.start);
+  const dl=end?diff(today,end):null;
+  const expired=dl!==null&&dl<0;
+  const obsStart = pd(sn.obsStart);
+  const inPro = obsStart ? today < obsStart : false;
+  const proRem = obsStart ? diff(today, obsStart) : 0;
+  const us=sn.underlyings||[];
+  const wi=worstIdx(us);
+
+  // KI 列
+  const kiRows=us.map((u,i)=>{
+    const p=parseFloat(u.price),ki=parseFloat(u.ki),ip=parseFloat(u.initPrice)||p;
+    if(isNaN(p)||isNaN(ki)) return '';
+    const buf=((p-ki)/ip)*100;
+    const isW=i===wi;
+    const bw=(Math.min(Math.max(buf,0),40)/40*100).toFixed(2);
+    const bc=buf>20?'#22c55e':buf>10?'#f59e0b':buf>0?'#ef4444':'#ff2d55';
+    const chg=((p-ip)/ip*100).toFixed(2);
+
+    const metBadge = u.met ? `<span class="met-badge">★已達標</span>` : '';
+
+    return `<div class="wof-row" onclick="toggleMet(${idx}, ${i})" style="cursor:pointer" title="點擊切換達標狀態">
+      <span class="wof-tk ${isW?'worst':''}">${u.ticker||'標的'+(i+1)}${metBadge}</span>
+      <div class="prog-bg"><div class="prog-fill" style="width:${bw}%;background:${bc}"></div></div>
+      <span class="wof-pct" style="color:${bc}">${buf>0?buf.toFixed(2)+'%':'已穿越'}</span>
+      <span class="wof-info">${fmt(p)} <span style="color:${parseFloat(chg)>=0?'var(--safe)':'var(--danger)'};font-size:10px">(${parseFloat(chg)>=0?'+':''}${chg}%)</span> <span style="color:var(--text3)">/ KI ${fmt(ki)} (${fmt(u.kiPct, 2)}%)</span></span>
+    </div>`;
+  }).join('');
+
+  // Autocall 分析
+  const ac = analyzeAC(sn);
+
+  // 產生各標的達標需求清單
+  const distGrid = ac.distItems.map(d => {
+    const isMet = d.distPct !== null && d.distPct >= 0;
+    return `
+      <div class="ac-dist-item" style="border-left: 3px solid ${isMet ? 'var(--safe)' : 'var(--warn)'}">
+        <div class="ac-dt">${d.ticker}</div>
+        <div class="ac-dv" style="font-size:15px; color:${isMet ? 'var(--safe)' : 'var(--text)'}">
+          ${isMet ? '★ 已達標' : `還差 <span style="color:var(--warn)">$${fmt(d.gapAmt)}</span> <span style="font-size:12px; color:var(--text3);">(+${d.neededPct.toFixed(2)}%)</span>`}
+        </div>
+        <div class="ac-dp">目標價: ${fmt(d.trig)}</div>
+      </div>`;
+  }).join('');
+
+  // 每日觀察期狀態文字
+  const dailyObsStatus = ac.acDailyStart 
+    ? (todayStr >= ac.acDailyStart ? `已開始 (始於 ${ac.acDailyStart})` : `尚未開始 (將於 ${ac.acDailyStart})`)
+    : '未設定';
+
+  // 簡化後的時間軸（每日觀察模式）
+  const simplifiedTimeline = `
+    <div class="ac-row r-next" style="justify-content: space-between;">
+      <span class="ac-date" style="color:var(--text3);">每日觀察期</span>
+      <span class="ac-res ftr" style="color:var(--text);">${dailyObsStatus}</span>
+    </div>
+  `;
+
+  // 利息計算與追蹤邏輯
+  const startDate = pd(sn.start);
+  const endDate = sn.redeemedDate ? pd(sn.redeemedDate) : today;
+  const daysHeld = Math.max(0, diff(startDate, endDate));
+  const avgDailyProfit = daysHeld > 0 ? (sn.actualInterest / daysHeld) : 0;
+  const marginCost = (sn.marginCapital || 0) * (sn.marginRate || 0) / 100 * (daysHeld / 365);
+  const netProfit = (sn.actualInterest || 0) - marginCost;
+  const theoInterest = (sn.estInterest || 0) * (daysHeld / 365);
+  const yieldPct = theoInterest > 0 ? (sn.actualInterest / theoInterest * 100) : 0;
+
+  const interestBar = `
+    <div class="blk-hdr">利息追蹤 &nbsp;·&nbsp; 預估年化利息：$${fmt(sn.estInterest, 0)}</div>
+    <div class="ac-dash" style="padding:10px 14px; margin-bottom:16px; border-color:var(--safe-bg);">
+      <div style="margin-bottom:8px; font-size:11px; color:var(--text2); display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+        <span>持有天數：${daysHeld} 天</span>
+        <span>平均每日獲利：$${fmt(avgDailyProfit)}</span>
+        <span>融資成本：<span style="color:var(--danger)">$${fmt(marginCost, 0)}</span></span>
+        <span>淨獲利：<span style="color:var(--safe); font-weight:600;">$${fmt(netProfit, 0)}</span></span>
+        <span>目前理論累積：$${fmt(theoInterest, 0)}</span>
+        <span>實際已領：$${fmt(sn.actualInterest, 0)}</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div class="ac-bar-bg" style="flex:1; height:8px;"><div class="ac-bar-fill" style="width:${Math.min(100, yieldPct).toFixed(2)}%; background:var(--safe);"></div></div>
+        <span style="font-family:var(--mono); font-size:12px; color:var(--safe); font-weight:600;">${yieldPct.toFixed(2)}%</span>
+      </div>
+      <div style="font-size:9px; color:var(--text3); margin-top:4px; text-align:right;">配息達成率 (實際已領 / 理論應領)</div>
+    </div>`;
+
+  // 距離全數達標顯示
+  const distStatusText = ac.distRemaining === 0 
+    ? `<span style="color:var(--safe)">★ 所有標的已達標</span>` 
+    : `距離全數達標還差 <span style="color:var(--danger); font-size:18px;">${ac.distRemaining.toFixed(2)}%</span>`;
+
+  const clsMap={ki:'s-ki',d:'s-d',w:'s-w',ok:'s-ok',exp:'s-exp',rdm:'s-rdm'};
+  const hasY = Object.values(sn.obsHistory||{}).includes('Y');
+  
+  // 今日可贖回閃爍標籤邏輯
+  const isRedeemableToday = ac.isObsToday && ac.canToday;
+  const acBadge = isRedeemableToday 
+    ? `<span class="badge b-ac-flash">今日可贖回</span>`
+    : (ac.isObsToday ? `<span class="badge b-ac">今日觀察中</span>` : '');
+
+  // 計算最關鍵的收合提示：哪一標的差多少錢觸發
+  let criticalMsg = '';
+  const wb = worstBuf(us);
+  if (sn.redeemedDate) {
+    criticalMsg = `<span style="color:var(--text3); font-size:11px;">結案獲利: $${fmt(sn.actualInterest, 0)}</span>`;
+  } else if (wb < 5 && !inPro) {
+    criticalMsg = `<span style="color:var(--danger); font-size:11px; font-weight:600;">⚠️ 距 KI 僅剩 ${wb <= 0 ? '已敲入' : wb.toFixed(2) + '%'}</span>`;
+  } else if (ac.canToday) {
+    criticalMsg = `<span style="color:var(--safe); font-size:11px; font-weight:600;">★ 已滿足觸發條件</span>`;
+  } else {
+    const worstAC = ac.distItems.reduce((a, b) => (a.distPct < b.distPct ? a : b));
+    criticalMsg = `<span style="color:var(--warn); font-size:11px;">距 ${worstAC.ticker} 達標差 <b style="font-family:var(--mono)">$${fmt(worstAC.gapAmt)}</b> (+${worstAC.neededPct.toFixed(2)}%)</span>`;
+  }
+
+  return `<div class="card ${clsMap[st.cls]||'s-ok'} ${expanded.has(idx)?'open':''}" data-idx="${idx}">
+    <div class="ctop" onclick="toggleCard(${idx})">
+      <div class="cleft">
+        <span class="cname">${sn.name||'未命名'}</span>
+        <span class="badge ${st.bc}">${st.lbl}</span>
+        ${inPro?`<span class="badge b-pro">觀察期倒數 ${proRem} 天</span>`:''}
+        ${acBadge}
+        ${!expanded.has(idx) ? `<span style="margin-left:8px; display:flex; align-items:center; gap:4px; padding-left:8px; border-left:1px solid var(--border);">${criticalMsg}</span>` : ''}
+        ${sn.note?`<span class="cnote">${sn.note}</span>`:''}
+      </div>
+      <div class="cright">
+        <span style="font-size:12px;color:var(--text3);font-family:var(--mono)">${dl!==null?(expired?'已到期':'剩 '+dl+' 天'):''}</span>
+        <span class="chevron">&#9662;</span>
+      </div>
+    </div>
+
+    <div class="cbody">
+      ${sn.redeemedDate?`
+        <div class="protect-banner" style="color:var(--text2);background:var(--bg4);border-color:var(--border2); display:flex; justify-content:space-between; align-items:center;">
+          <span>&#127882; 此票券已於 ${sn.redeemedDate} 提前贖回出場</span>
+          <span style="display:flex; gap:15px; font-size:12px; font-weight:600;">
+            <span style="color:var(--safe);">獲利：$${fmt(sn.actualInterest, 0)}</span>
+            <span style="color:var(--gold);">ROI：${sn.ownCapital > 0 ? fmt(sn.actualInterest / sn.ownCapital * 100, 2) + '%' : '—'}</span>
+          </span>
+        </div>`:''}
+      ${inPro?`<div class="protect-banner">&#128737; 尚未進入每日觀察期（至 ${sn.obsStart}）：KI 敲入目前不生效</div>`:''}
+
+      <div class="blk-hdr">KI 緩衝距離（Worst-of &#9660;）</div>
+      <div class="ki-blk">${kiRows}</div>
+
+      <div class="blk-hdr">Autocall 每日觀察儀表板 &nbsp;·&nbsp; 門檻 ${ac.acPct}%</div>
+      <div class="ac-dash">
+        <div style="text-align:center; padding:15px 0; background:var(--bg4); border-radius:8px; margin-bottom:12px; border:1px solid var(--border);">
+          <div style="font-size:11px; color:var(--text3); margin-bottom:5px;">Autocall 狀態</div>
+          <div style="font-family:var(--mono); font-weight:600;">${distStatusText}</div>
+        </div>
+        <div class="ac-dist-grid" style="margin-bottom:16px;">${distGrid}</div>
+        ${interestBar}
+        <div class="ac-tl-lbl">比價與配息進度</div>
+        <div class="ac-rows">${simplifiedTimeline}</div>
+      </div>
+
+      <div class="fields-grid">
+        <div><div class="fl">資產配置</div><div class="fv">${fmt(sn.ownCapital, 0)} <span style="font-size:10px; color:var(--text3);">/ ${fmt(sn.marginCapital, 0)}</span></div><div class="fs">自有 / 融資 (${sn.marginRate || 0}%)</div></div>
+        <div><div class="fl">票面利率</div><div class="fv s">${sn.rate?sn.rate+'%':'—'}</div><div class="fs">${sn.cycle||''}</div></div>
+        <div><div class="fl">起始日</div><div class="fv">${sn.start||'—'}</div></div>
+        <div><div class="fl">觀察起始日</div><div class="fv">${sn.obsStart||'—'}</div></div>
+        <div><div class="fl">到期日</div><div class="fv ${dl!==null&&dl<=30&&!expired?'w':''}">${sn.end||'—'}</div><div class="fs">${expired?'已到期':dl!==null?'剩 '+dl+' 天':''}</div></div>
+        ${sn.redeemedDate?`<div><div class="fl">贖回日期</div><div class="fv g">${sn.redeemedDate}</div></div>`:''}
+      </div>
+
+      <div class="card-acts">
+        ${!sn.redeemedDate?`<button class="btn-s" onclick="updatePrices(${idx})">更新現價</button>`:''}
+        <button class="btn-s" onclick="recordObs(${idx})">紀錄觀察日結果</button>
+        ${(ac.canToday || hasY) && !sn.redeemedDate ? `<button class="btn-s" style="color:var(--gold);border-color:var(--gold)" onclick="recordRedemption(${idx})">紀錄贖回日期</button>` : ''}
+        <button class="btn-s" onclick="openModal(${idx})">編輯</button>
+        <button class="btn-d" onclick="delCard(${idx})">刪除</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── 互動 ──
+
+function toggleCard(i) { if(expanded.has(i))expanded.delete(i); else expanded.add(i); renderCards(); }
+function expandAll()   { data.forEach((_,i)=>expanded.add(i)); renderCards(); }
+function collapseAll() { expanded.clear(); renderCards(); }
+
+/** 更新單一票券現價 (呼叫全域更新邏輯) */
+async function updatePrices(idx) {
+  const btn = event.currentTarget;
+  const originalText = btn.textContent;
+  btn.textContent = '更新中...'; btn.disabled = true; btn.style.opacity = '0.7';
+  
+  try {
+    document.getElementById('loading-text').textContent = '正在更新標的股價...';
+    // 僅針對該張票券的標的進行更新
+    const tickers = data[idx].underlyings.map(u => u.ticker);
+    await updateCurrentPrices(tickers);
+  } catch (e) {
+    console.error('單一更新失敗:', e);
+  } finally {
+    btn.textContent = originalText; btn.disabled = false; btn.style.opacity = '1';
+  }
+}
+
+/** 全部更新的按鈕進入點 */
+async function updateAllPrices() {
+  if(!data.length) return;
+  const btn = event.currentTarget;
+  const originalText = btn.textContent;
+  btn.textContent = '全部更新中...'; btn.disabled = true; btn.style.opacity = '0.7';
+
+  // 收集所有票券中不重複的標的代號
+  const allTickers = new Set();
+  data.forEach(sn => sn.underlyings.forEach(u => allTickers.add(u.ticker)));
+
+  try {
+    document.getElementById('loading-text').textContent = '正在更新所有票券股價...';
+    await updateCurrentPrices([...allTickers]);
+  } catch (e) {
+    alert('部分股價更新失敗，請查看 Console 紀錄');
+  } finally {
+    btn.textContent = originalText; btn.disabled = false; btn.style.opacity = '1';
+  }
+}
+
+/** 
+ * 核心抓取函式：updateCurrentPrices
+ * 透過 Yahoo Finance API 抓取價格並自動映射回 data 陣列
+ */
+async function updateCurrentPrices(tickers) {
+  const overlay = document.getElementById('loading-overlay');
+  overlay.style.display = 'flex';
+
+  try {
+    const proxy = 'https://api.allorigins.win/get?url=';
+    
+    await Promise.all(tickers.map(async (symbol) => {
+      try {
+        const target = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1m&range=1d`;
+        const res = await fetch(proxy + encodeURIComponent(target));
+        const json = await res.json();
+        const result = JSON.parse(json.contents);
+        const newPrice = result?.chart?.result?.[0]?.meta?.regularMarketPrice;
+
+        if (!newPrice) throw new Error(`查無代號: ${symbol}`);
+
+        // 自動尋找 data 陣列中所有符合該代號的 underlyings 並更新
+        data.forEach(sn => {
+          const acPct = parseFloat(sn.autocallPct) || 100;
+          sn.underlyings.forEach(u => {
+            if (u.ticker === symbol) {
+              u.price = newPrice;
+              // 自動檢查是否達標 (現價 >= 觸發價)
+              if (newPrice >= (u.initPrice * acPct / 100)) {
+                u.met = true;
+              }
+            }
+          });
+        });
+        console.log(`[成功] ${symbol}: ${newPrice}`);
+      } catch (e) {
+        console.error(`[失敗] 無法更新 ${symbol}:`, e.message);
+      }
+    }));
+
+    save(data);
+    render();
+  } finally {
+    // 稍微延遲關閉動畫 (400ms)，避免閃爍並讓使用者感受到更新完成
+    setTimeout(() => { overlay.style.display = 'none'; }, 400);
+  }
+}
+
+/** 手動切換標的是否曾達標過 */
+function toggleMet(snIdx, uIdx) {
+  if (!data[snIdx] || !data[snIdx].underlyings[uIdx]) return;
+  data[snIdx].underlyings[uIdx].met = !data[snIdx].underlyings[uIdx].met;
+  save(data);
+  render();
+}
+
+/** 手動紀錄過去觀察日的結果（Y/N）*/
+function recordObs(idx) {
+  const sn=data[idx];
+  const past=(sn.obs||[]).filter(d=>d<todayStr).sort();
+  if(!past.length){alert('沒有已過的觀察日可紀錄');return;}
+  const ds=prompt(`請輸入要紀錄的觀察日（格式 YYYY-MM-DD）：\n可選：${past.join(', ')}`);
+  if(!ds)return;
+  if(!past.includes(ds)){alert('日期不在觀察日列表中');return;}
+  const r=(prompt(`${ds} 的 Autocall 結果：\n輸入 Y（全部達標，提前贖回）或 N（未達標，繼續）`)||'').trim().toUpperCase();
+  if(r!=='Y'&&r!=='N'){alert('請輸入 Y 或 N');return;}
+  if(!sn.obsHistory)sn.obsHistory={};
+  sn.obsHistory[ds]=r;
+  save(data);render();
+}
+
+/** 紀錄提前贖回日期 */
+function recordRedemption(idx) {
+  const sn = data[idx];
+  const d = prompt(`請輸入贖回日期（YYYY-MM-DD）：`, todayStr);
+  if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    sn.redeemedDate = d;
+    save(data);
+    render();
+  } else if (d) { alert('日期格式錯誤'); }
+}
+
+function delCard(idx) {
+  if(!confirm(`確定刪除「${data[idx]?.name}」？`))return;
+  expanded.delete(idx);data.splice(idx,1);save(data);render();
+}
+
+// ── Modal ──
+function renderUF() {
+  const n=parseInt(document.getElementById('f-ucount').value);
+  let h='';
+  for(let i=0;i<n;i++){
+    h+=`<div class="ub"><div class="ub-title">標的物 ${i+1}</div>
+      <div class="fr"><label class="fl2">代號 / 名稱</label><input type="text" id="u-t-${i}" placeholder="e.g. 2330.TW"></div>
+      <div class="fr3">
+        <div><label class="fl2">期初價 <span>（合約時）</span></label><input type="number" id="u-i-${i}"></div>
+        <div><label class="fl2">現價 <span>（手動）</span></label><input type="number" id="u-p-${i}"></div>
+        <div><label class="fl2">敲入比例 KI %</label><input type="number" id="u-kp-${i}" placeholder="e.g. 70"></div>
+      </div></div>`;
+  }
+  document.getElementById('u-fields').innerHTML=h;
+}
+
+function openModal(idx) {
+  editIdx=(idx!==undefined)?idx:-1;
+  document.getElementById('m-title').textContent=editIdx>=0?'編輯票券':'新增票券';
+  const sn=editIdx>=0?data[editIdx]:{};
+  document.getElementById('f-name').value=sn.name||'';
+  document.getElementById('f-start').value=sn.start||'';
+  document.getElementById('f-end').value=sn.end||'';
+  document.getElementById('f-obs-start').value=sn.obsStart||'';
+  document.getElementById('f-rate').value=sn.rate||'';
+  document.getElementById('f-cycle').value=sn.cycle||'月配';
+  document.getElementById('f-note').value=sn.note||'';
+  document.getElementById('f-own-cap').value=sn.ownCapital||'';
+  document.getElementById('f-margin-cap').value=sn.marginCapital||'';
+  document.getElementById('f-margin-rate').value=sn.marginRate||'';
+  document.getElementById('f-principal').value=sn.principal||'0';
+  document.getElementById('f-est-int').value=sn.estInterest||'0';
+  document.getElementById('f-act-int').value=sn.actualInterest||'';
+  document.getElementById('f-redeemed').value=sn.redeemedDate||'';
+  
+  // 自動計算預估年利息邏輯
+  const calc = () => {
+    const own = parseFloat(document.getElementById('f-own-cap').value) || 0;
+    const margin = parseFloat(document.getElementById('f-margin-cap').value) || 0;
+    const p = own + margin;
+    document.getElementById('f-principal').value = p;
+    const r = parseFloat(document.getElementById('f-rate').value) || 0;
+    const res = p * r / 100;
+    document.getElementById('f-est-int').value = res;
+    document.getElementById('f-calc-result').textContent = res > 0 ? ` (預估年息: ${fmt(res, 0)})` : '';
+  };
+  document.getElementById('f-rate').oninput = calc;
+  document.getElementById('f-own-cap').oninput = calc;
+  document.getElementById('f-margin-cap').oninput = calc;
+  calc();
+
+  document.getElementById('f-acpct').value=sn.autocallPct||100;
+  document.getElementById('f-ac-daily-start').value=sn.acDailyStart||'';
+  document.getElementById('f-obs').value=(sn.obs||[]).join(', ');
+  const hist=sn.obsHistory||{};
+  document.getElementById('f-hist').value=Object.entries(hist).map(([d,r])=>`${d}:${r}`).join(', ');
+  const uc=Math.min(Math.max((sn.underlyings||[]).length||2,2),3);
+  document.getElementById('f-ucount').value=uc;
+  renderUF();
+  if(editIdx>=0&&sn.underlyings){
+    sn.underlyings.forEach((u,i)=>{
+      const g=id=>document.getElementById(id);
+      if(g(`u-t-${i}`))g(`u-t-${i}`).value=u.ticker||'';
+      if(g(`u-i-${i}`))g(`u-i-${i}`).value=u.initPrice||'';
+      if(g(`u-p-${i}`))g(`u-p-${i}`).value=u.price||'';
+      if(g(`u-kp-${i}`))g(`u-kp-${i}`).value=u.kiPct||'';
+    });
+  }
+  document.getElementById('modal').style.display='block';
+}
+
+function closeModal(){document.getElementById('modal').style.display='none';}
+
+function saveCard() {
+  const name=document.getElementById('f-name').value.trim();
+  const start=document.getElementById('f-start').value;
+  const end=document.getElementById('f-end').value;
+  if(!name||!start||!end){alert('請填寫：名稱、起始日、到期日');return;}
+
+  const obsStart=document.getElementById('f-obs-start').value;
+  const rate=parseFloat(document.getElementById('f-rate').value);
+  const cycle=document.getElementById('f-cycle').value;
+  const note=document.getElementById('f-note').value.trim();
+  const ownCapital=parseFloat(document.getElementById('f-own-cap').value)||0;
+  const marginCapital=parseFloat(document.getElementById('f-margin-cap').value)||0;
+  const marginRate=parseFloat(document.getElementById('f-margin-rate').value)||0;
+  const principal = ownCapital + marginCapital;
+  const estInterest = principal * (rate / 100);
+  const actualInterest=parseFloat(document.getElementById('f-act-int').value)||0;
+  const redeemedDate=document.getElementById('f-redeemed').value;
+  const autocallPct=parseFloat(document.getElementById('f-acpct').value)||100;
+  const acDailyStart=document.getElementById('f-ac-daily-start').value;
+  const uc=parseInt(document.getElementById('f-ucount').value);
+  const us=[];
+
+  for(let i=0;i<uc;i++){
+    const t=(document.getElementById(`u-t-${i}`)?.value||'').trim();
+    const ip=parseFloat(document.getElementById(`u-i-${i}`)?.value);
+    const p=parseFloat(document.getElementById(`u-p-${i}`)?.value);
+    const kp=parseFloat(document.getElementById(`u-kp-${i}`)?.value);
+    if(!t||isNaN(ip)||isNaN(p)||isNaN(kp)){alert(`標的物 ${i+1} 資料不完整`);return;}
+    const k = parseFloat((ip * kp / 100).toFixed(4));
+    if(k>=ip){if(!confirm(`${t} 的 KI（${k}）≥ 期初價（${ip}），確認繼續？`))return;}
+    us.push({ticker:t,initPrice:ip,price:p,ki:k,kiPct:kp,met:false});
+  }
+
+  const obs=document.getElementById('f-obs').value.split(',').map(s=>s.trim()).filter(s=>/^\d{4}-\d{2}-\d{2}$/.test(s)).sort();
+  const obsHistory={};
+  document.getElementById('f-hist').value.split(',').map(s=>s.trim()).forEach(s=>{
+    const[d,r]=s.split(':');
+    if(/^\d{4}-\d{2}-\d{2}$/.test(d)&&(r==='Y'||r==='N'))obsHistory[d]=r;
+  });
+
+  const entry={name,start,end,obsStart,rate,cycle,note,ownCapital,marginCapital,marginRate,principal,estInterest,actualInterest,redeemedDate,autocallPct,acDailyStart,underlyings:us,obs,obsHistory};
+  if(editIdx>=0)data[editIdx]=entry; else data.push(entry);
+  save(data);closeModal();render();
+}
+
+// ── 主入口 ──
+function render(){ renderBadge(); renderSummary(); renderCards(); }
+
+// 示範資料
+// 修正後的初始化與真實數據
+function demo() {
+  return [
+    {
+      name: 'AI科技股',
+      start: '2026-02-18',
+      end: '2026-08-20',
+      rate: 16.08,
+      cycle: '月配',
+      autocallPct: 95,
+      underlyings: [
+        { ticker: 'TSM', initPrice: 374.09, price: 370.60, kiPct: 60, ki: 224.45 },
+        { ticker: 'NVDA', initPrice: 190.05, price: 188.63, kiPct: 60, ki: 114.03 },
+        { ticker: 'MU', initPrice: 410.34, price: 420.59, kiPct: 60, ki: 246.20, met: true }
+      ],
+      obs: ['2026-03-18'],
+      obsHistory: { '2026-03-18': 'N' }
+    },
+    {
+      name: '航空運輸',
+      start: '2026-03-05',
+      end: '2026-12-09',
+      rate: 10.32,
+      cycle: '月配',
+      autocallPct: 95,
+      underlyings: [
+        { ticker: 'BA', initPrice: 229.41, price: 217.63, kiPct: 60, ki: 137.65, met: true },
+        { ticker: 'UAL', initPrice: 116.43, price: 96.40, kiPct: 60, ki: 69.86 },
+        { ticker: 'NEM', initPrice: 127.47, price: 120.90, kiPct: 60, ki: 76.48 }
+      ],
+      obs: ['2026-04-06'],
+      obsHistory: {}
+    },
+    {
+      name: 'AI科技股2',
+      start: '2026-03-09',
+      end: '2026-09-16',
+      rate: 23.40,
+      cycle: '月配',
+      autocallPct: 100,
+      underlyings: [
+        { ticker: 'TSM', initPrice: 348.7, price: 370.60, kiPct: 60, ki: 209.22 },
+        { ticker: 'MU', initPrice: 389.32, price: 420.59, kiPct: 60, ki: 233.59 }
+      ],
+      obs: ['2026-04-16'],
+      obsHistory: {}
+    },
+    {
+      name: '原物料',
+      start: '2026-03-09',
+      end: '2026-12-18',
+      rate: 13.56,
+      cycle: '月配',
+      autocallPct: 100,
+      underlyings: [
+        { ticker: 'FCX', initPrice: 60.49, price: 67.80, kiPct: 50, ki: 30.25 },
+        { ticker: 'NEM', initPrice: 116.96, price: 120.90, kiPct: 50, ki: 58.48 },
+        { ticker: 'AA', initPrice: 61.16, price: 73.00, kiPct: 50, ki: 30.58 }
+      ],
+      obs: ['2026-04-16'],
+      obsHistory: {}
+    }
+  ];
+}
+
+// 修正後的啟動邏輯 (放在程式碼最後)
+const storedData = load();
+if (storedData && Array.isArray(storedData) && storedData.length > 0) {
+    data = storedData;
+} else {
+    data = demo();
+    save(data);
+}
+render();
+</script>
+</body>
+</html>
