@@ -1013,67 +1013,7 @@ function render(){ renderBadge(); renderSummary(); renderCards(); }
 // 示範資料
 // 修正後的初始化與真實數據
 function demo() {
-  return [
-    {
-      name: 'AI科技股',
-      start: '2026-02-18',
-      end: '2026-08-20',
-      rate: 16.08,
-      cycle: '月配',
-      autocallPct: 95,
-      underlyings: [
-        { ticker: 'TSM', initPrice: 374.09, price: 370.60, kiPct: 60, ki: 224.45 },
-        { ticker: 'NVDA', initPrice: 190.05, price: 188.63, kiPct: 60, ki: 114.03 },
-        { ticker: 'MU', initPrice: 410.34, price: 420.59, kiPct: 60, ki: 246.20, met: true }
-      ],
-      obs: ['2026-03-18'],
-      obsHistory: { '2026-03-18': 'N' }
-    },
-    {
-      name: '航空運輸',
-      start: '2026-03-05',
-      end: '2026-12-09',
-      rate: 10.32,
-      cycle: '月配',
-      autocallPct: 95,
-      underlyings: [
-        { ticker: 'BA', initPrice: 229.41, price: 217.63, kiPct: 60, ki: 137.65, met: true },
-        { ticker: 'UAL', initPrice: 116.43, price: 96.40, kiPct: 60, ki: 69.86 },
-        { ticker: 'NEM', initPrice: 127.47, price: 120.90, kiPct: 60, ki: 76.48 }
-      ],
-      obs: ['2026-04-06'],
-      obsHistory: {}
-    },
-    {
-      name: 'AI科技股2',
-      start: '2026-03-09',
-      end: '2026-09-16',
-      rate: 23.40,
-      cycle: '月配',
-      autocallPct: 100,
-      underlyings: [
-        { ticker: 'TSM', initPrice: 348.7, price: 370.60, kiPct: 60, ki: 209.22 },
-        { ticker: 'MU', initPrice: 389.32, price: 420.59, kiPct: 60, ki: 233.59 }
-      ],
-      obs: ['2026-04-16'],
-      obsHistory: {}
-    },
-    {
-      name: '原物料',
-      start: '2026-03-09',
-      end: '2026-12-18',
-      rate: 13.56,
-      cycle: '月配',
-      autocallPct: 100,
-      underlyings: [
-        { ticker: 'FCX', initPrice: 60.49, price: 67.80, kiPct: 50, ki: 30.25 },
-        { ticker: 'NEM', initPrice: 116.96, price: 120.90, kiPct: 50, ki: 58.48 },
-        { ticker: 'AA', initPrice: 61.16, price: 73.00, kiPct: 50, ki: 30.58 }
-      ],
-      obs: ['2026-04-16'],
-      obsHistory: {}
-    }
-  ];
+  return [];
 }
 
 // 修正後的啟動邏輯 (放在程式碼最後)
