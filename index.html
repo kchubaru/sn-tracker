@@ -48,6 +48,7 @@
   --sans:     'Segoe UI', system-ui, -apple-system, sans-serif;
   --r:        10px;
   --rl:       16px;
+  --dim:      #525876;
 }
 body { background:var(--bg); color:var(--text); font-family:var(--sans); font-size:14px; line-height:1.6; min-height:100vh; }
 .page { max-width:980px; margin:0 auto; padding:24px 16px 80px; }
@@ -69,6 +70,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--sans); font-si
 /* toolbar */
 .toolbar { display:flex; align-items:center; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
 .sec-title { font-size:13px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:0.8px; flex:1; }
+.auto-status { font-size:10px; color:var(--text3); margin-right:10px; font-family:var(--mono); }
 
 /* 按鈕 */
 .btn { font-size:12px; padding:7px 14px; border-radius:8px; border:1px solid var(--border2); background:var(--bg3); color:var(--text); cursor:pointer; transition:background 0.15s; white-space:nowrap; }
@@ -249,6 +251,7 @@ input[type=date]::-webkit-calendar-picker-indicator { filter:invert(0.6); }
 
   <div class="toolbar">
     <span class="sec-title">持有票券</span>
+    <span id="auto-update-status" class="auto-status"></span>
     <button class="btn btn-p" onclick="updateAllPrices()">全部更新現價</button>
     <button class="btn" onclick="exportData()">匯出備份</button>
     <button class="btn" onclick="importData()">匯入備份</button>
@@ -765,40 +768,47 @@ function collapseAll() { expanded.clear(); renderCards(); }
 
 /** 更新單一票券現價 (呼叫全域更新邏輯) */
 async function updatePrices(idx) {
-  const btn = event.currentTarget;
-  const originalText = btn.textContent;
-  btn.textContent = '更新中...'; btn.disabled = true; btn.style.opacity = '0.7';
+  const btn = (typeof event !== 'undefined' && event && event.currentTarget) ? event.currentTarget : null;
+  const originalText = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = '更新中...'; btn.disabled = true; btn.style.opacity = '0.7'; }
   
   try {
     document.getElementById('loading-text').textContent = '正在更新標的股價...';
     // 僅針對該張票券的標的進行更新
     const tickers = data[idx].underlyings.map(u => u.ticker);
-    await updateCurrentPrices(tickers);
+    await updateCurrentPrices(tickers, false);
   } catch (e) {
     console.error('單一更新失敗:', e);
   } finally {
-    btn.textContent = originalText; btn.disabled = false; btn.style.opacity = '1';
+    if (btn) { btn.textContent = originalText; btn.disabled = false; btn.style.opacity = '1'; }
   }
 }
 
 /** 全部更新的按鈕進入點 */
-async function updateAllPrices() {
+async function updateAllPrices(silent = false) {
   if(!data.length) return;
-  const btn = event.currentTarget;
-  const originalText = btn.textContent;
-  btn.textContent = '全部更新中...'; btn.disabled = true; btn.style.opacity = '0.7';
+
+  // 確保 silent 是布林值 (防止 HTML event 物件傳入誤判)
+  const isSilent = (silent === true);
+
+  // 檢查是否有 event 物件 (由按鈕觸發)，若由 setInterval 觸發則為 undefined
+  const isManual = !isSilent && (typeof event !== 'undefined' && event && event.currentTarget);
+  const btn = isManual ? event.currentTarget : null;
+  const originalText = btn ? btn.textContent : '';
+
+  if (btn) { btn.textContent = '全部更新中...'; btn.disabled = true; btn.style.opacity = '0.7'; }
 
   // 收集所有票券中不重複的標的代號
   const allTickers = new Set();
   data.forEach(sn => sn.underlyings.forEach(u => allTickers.add(u.ticker)));
 
   try {
-    document.getElementById('loading-text').textContent = '正在更新所有票券股價...';
-    await updateCurrentPrices([...allTickers]);
+    if (!isSilent) document.getElementById('loading-text').textContent = '正在更新所有票券股價...';
+    await updateCurrentPrices([...allTickers], isSilent);
   } catch (e) {
-    alert('部分股價更新失敗，請查看 Console 紀錄');
+    if (!isSilent) alert('部分股價更新失敗，請查看 Console 紀錄');
   } finally {
-    btn.textContent = originalText; btn.disabled = false; btn.style.opacity = '1';
+    if (btn) { btn.textContent = originalText; btn.disabled = false; btn.style.opacity = '1'; }
   }
 }
 
@@ -806,22 +816,24 @@ async function updateAllPrices() {
  * 核心抓取函式：updateCurrentPrices
  * 透過 Yahoo Finance API 抓取價格並自動映射回 data 陣列
  */
-async function updateCurrentPrices(tickers) {
+async function updateCurrentPrices(tickers, silent = false) {
   const overlay = document.getElementById('loading-overlay');
-  overlay.style.display = 'flex';
+  if (!silent) overlay.style.display = 'flex';
 
   try {
-    const proxy = 'https://api.allorigins.win/get?url=';
+    // 改用 corsproxy.io 提供更穩定的代理服務
+    const proxy = 'https://corsproxy.io/?';
     
     await Promise.all(tickers.map(async (symbol) => {
       try {
         const target = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1m&range=1d`;
         const res = await fetch(proxy + encodeURIComponent(target));
-        const json = await res.json();
-        const result = JSON.parse(json.contents);
+        if (!res.ok) throw new Error(`HTTP 請求失敗，狀態碼: ${res.status}`);
+        
+        const result = await res.json(); // corsproxy.io 直接回傳目標內容
         const newPrice = result?.chart?.result?.[0]?.meta?.regularMarketPrice;
 
-        if (!newPrice) throw new Error(`查無代號: ${symbol}`);
+        if (newPrice === undefined || newPrice === null) throw new Error(`查無價格資料: ${symbol}`);
 
         // 自動尋找 data 陣列中所有符合該代號的 underlyings 並更新
         data.forEach(sn => {
@@ -829,16 +841,14 @@ async function updateCurrentPrices(tickers) {
           sn.underlyings.forEach(u => {
             if (u.ticker === symbol) {
               u.price = newPrice;
-              // 自動檢查是否達標 (現價 >= 觸發價)
-              if (newPrice >= (u.initPrice * acPct / 100)) {
-                u.met = true;
-              }
+              // 自動對比現價與觸發價門檻，更新達標狀態
+              u.met = newPrice >= (u.initPrice * acPct / 100);
             }
           });
         });
         console.log(`[成功] ${symbol}: ${newPrice}`);
       } catch (e) {
-        console.error(`[失敗] 無法更新 ${symbol}:`, e.message);
+        console.error(`[失敗] 更新 ${symbol} 時發生錯誤:`, e.message, e);
       }
     }));
 
@@ -846,8 +856,27 @@ async function updateCurrentPrices(tickers) {
     render();
   } finally {
     // 稍微延遲關閉動畫 (400ms)，避免閃爍並讓使用者感受到更新完成
-    setTimeout(() => { overlay.style.display = 'none'; }, 400);
+    if (!silent) {
+      setTimeout(() => { overlay.style.display = 'none'; }, 400);
+    }
   }
+}
+
+/** 設定自動更新計時器 */
+let autoUpdateTimer = null;
+function startAutoUpdate(minutes = 5) {
+  if (autoUpdateTimer) clearInterval(autoUpdateTimer);
+  
+  const statusEl = document.getElementById('auto-update-status');
+  if (statusEl) statusEl.textContent = `自動更新: ON (${minutes}min)`;
+
+  autoUpdateTimer = setInterval(async () => {
+    const now = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    console.log(`[系統] 觸發定時更新: ${now}`);
+    
+    // 靜默更新：不顯示全螢幕 Loading 以免打擾使用者
+    await updateAllPrices(true); 
+  }, minutes * 60 * 1000);
 }
 
 /** 手動切換標的是否曾達標過 */
@@ -1025,6 +1054,9 @@ if (storedData && Array.isArray(storedData) && storedData.length > 0) {
     save(data);
 }
 render();
+
+// 初始化自動更新 (預設 5 分鐘)
+startAutoUpdate(5);
 </script>
 </body>
 </html>
