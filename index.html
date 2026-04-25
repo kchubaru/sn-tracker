@@ -519,58 +519,69 @@ function renderBadge() {
 
 function renderSummary() {
   if(!data.length){document.getElementById('summary').innerHTML='';return;}
-  let ki=0,d=0,w=0,exp=0,acToday=0,totalP=0,totalA=0,totalEstAnn=0,totalTheo=0,redCount=0,redP=0,redI=0,totalOwn=0,totalMargin=0,redOwn=0;
-  data.forEach(sn=>{
-    const st=getStatus(sn);
-    if(st.cls==='ki')ki++;
-    else if(st.cls==='d')d++;
-    else if(st.cls==='w')w++;
-    const end=pd(sn.end);
-    if(end){const dl=diff(today,end);if(dl>=0&&dl<=30)exp++;}
-    const ac=analyzeAC(sn);
-    if(ac.isObsToday && ac.canToday) acToday++;
-    const own = parseFloat(sn.ownCapital || 0);
-    const margin = parseFloat(sn.marginCapital || 0);
-    const p = own + margin;
-    totalOwn += own; totalMargin += margin;
-    const r = parseFloat(sn.rate || 0);
-    totalP += p;
-    totalA += parseFloat(sn.actualInterest || 0);
+  let ki = 0, d = 0, w = 0, exp = 0, acToday = 0;
+  let currentOwn = 0;     // 目前在場的自有資金
+  let currentMargin = 0;  // 目前在場的融資
+  let totalEstAnn = 0;    // 預計年息
+  let totalTheo = 0;      // 理論應領
+  let totalActInt = 0;    // 總共領到的利息（含已贖回）
+  let redCount = 0;       // 贖回次數
+  let redInt = 0;         // 贖回領取的總利息
+
+  data.forEach(sn => {
+    const st = getStatus(sn);
+    const isRedeemed = !!sn.redeemedDate;
     
-    // 僅針對未贖回票券計算預計利息與理論應領
-    if (!sn.redeemedDate) {
-      const ann = p * (r / 100);
+    // 累計所有票券領過的利息 (無論是否贖回)
+    totalActInt += parseFloat(sn.actualInterest || 0);
+
+    if (!isRedeemed) {
+      // 只有「未贖回」的票券才計算本金與預計年息
+      const own = parseFloat(sn.ownCapital || 0);
+      const margin = parseFloat(sn.marginCapital || 0);
+      currentOwn += own;
+      currentMargin += margin;
+      
+      const r = parseFloat(sn.rate || 0);
+      const ann = (own + margin) * (r / 100);
       totalEstAnn += ann;
+      
       const start = pd(sn.start);
       if (start) {
         const days = Math.max(0, diff(start, today));
         totalTheo += ann * (days / 365);
       }
+      
+      // 狀態統計
+      if(st.cls==='ki') ki++;
+      else if(st.cls==='d') d++;
+      else if(st.cls==='w') w++;
+      
+      const ac = analyzeAC(sn);
+      if(ac.isObsToday && ac.canToday) acToday++;
+
+      const end = pd(sn.end);
+      if(end){const dl=diff(today,end);if(dl>=0&&dl<=30)exp++;}
     } else {
-      // 已贖回票券統計
+      // 已贖回統計
       redCount++;
-      redP += p;
-      redOwn += own;
-      redI += parseFloat(sn.actualInterest || 0);
+      redInt += parseFloat(sn.actualInterest || 0);
     }
   });
-  const rates=data.filter(sn=>!isNaN(parseFloat(sn.rate)));
-  const avg=rates.length?(rates.reduce((a,sn)=>a+parseFloat(sn.rate),0)/rates.length).toFixed(2):'—';
 
-  const redROI = redOwn > 0 ? (redI / redOwn * 100).toFixed(2) : '—';
+  const activeRates = data.filter(sn => !sn.redeemedDate && !isNaN(parseFloat(sn.rate)));
+  const avg = activeRates.length ? (activeRates.reduce((a, sn) => a + parseFloat(sn.rate), 0) / activeRates.length).toFixed(2) : '—';
 
-  document.getElementById('summary').innerHTML=`
-    <div class="metric"><div class="m-lbl">持有票數</div><div class="m-val">${data.length}</div><div class="m-sub">目前追蹤中</div></div>
-    <div class="metric"><div class="m-lbl">自有資金總額</div><div class="m-val s">${fmt(totalOwn, 0)}</div><div class="m-sub">融資總額：${fmt(totalMargin, 0)}</div></div>
-    <div class="metric"><div class="m-lbl">預計年利息</div><div class="m-val s">${fmt(totalEstAnn, 0)}</div><div class="m-sub">年化預估收</div></div>
-    <div class="metric"><div class="m-lbl">總平均每日獲利</div><div class="m-val g">${fmt(totalEstAnn / 365, 2)}</div><div class="m-sub">每日利息收入</div></div>
+  document.getElementById('summary').innerHTML = `
+    <div class="metric"><div class="m-lbl">在場票數</div><div class="m-val">${data.filter(s=>!s.redeemedDate).length}</div><div class="m-sub">已結案：${redCount}</div></div>
+    <div class="metric"><div class="m-lbl">目前投入本金</div><div class="m-val s">${fmt(currentOwn, 0)}</div><div class="m-sub">融資：${fmt(currentMargin, 0)}</div></div>
+    <div class="metric"><div class="m-lbl">預計年化收益</div><div class="m-val s">${fmt(totalEstAnn, 0)}</div><div class="m-sub">日均：${fmt(totalEstAnn / 365, 0)}</div></div>
     <div class="metric"><div class="m-lbl">目前預估利息</div><div class="m-val g">${fmt(totalTheo, 0)}</div><div class="m-sub">理論累積</div></div>
-    <div class="metric"><div class="m-lbl">累計已領利息</div><div class="m-val s">${fmt(totalA, 0)}</div><div class="m-sub">實際已入帳</div></div>
-    <div class="metric"><div class="m-lbl">結案累積獲利</div><div class="m-val g">${fmt(redI, 0)}</div><div class="m-sub">已結案數：${redCount}</div></div>
-    <div class="metric"><div class="m-lbl">結案平均投報</div><div class="m-val g">${redROI}${redOwn > 0 ? '%' : ''}</div><div class="m-sub">ROI (利息/自有資金)</div></div>
-    <div class="metric"><div class="m-lbl">已敲入/警戒</div><div class="m-val ${ki+d>0?'d':''}">${ki+d}</div><div class="m-sub">已穿越或距 KI &le;10%</div></div>
-    <div class="metric"><div class="m-lbl">今日可 Autocall</div><div class="m-val ${acToday>0?'g':''}">${acToday}</div><div class="m-sub">觀察日達標</div></div>
-    <div class="metric"><div class="m-lbl">平均利率</div><div class="m-val s">${avg}${rates.length?'%':''}</div></div>
+    <div class="metric"><div class="m-lbl">累計實領利息</div><div class="m-val s">${fmt(totalActInt, 0)}</div><div class="m-sub">含已結案獲利</div></div>
+    <div class="metric"><div class="m-lbl">結案累積獲利</div><div class="m-val g">${fmt(redInt, 0)}</div><div class="m-sub">已結案數：${redCount}</div></div>
+    <div class="metric"><div class="m-lbl">已敲入/警戒</div><div class="m-val ${ki + d > 0 ? 'd' : ''}">${ki + d}</div><div class="m-sub">已穿越或距 KI &le;10%</div></div>
+    <div class="metric"><div class="m-lbl">今日可 Autocall</div><div class="m-val ${acToday > 0 ? 'g' : ''}">${acToday}</div><div class="m-sub">觀察日達標</div></div>
+    <div class="metric"><div class="m-lbl">平均利率</div><div class="m-val s">${avg}${activeRates.length ? '%' : ''}</div><div class="m-sub">僅計在場票券</div></div>
   `;
 }
 
